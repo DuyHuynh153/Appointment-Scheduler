@@ -1,13 +1,21 @@
-"""Domain exception types + centralized exception handler.
+"""Domain exception types + centralized exception handlers.
 
 The domain exception hierarchy below is raised by the service layer
 (`app/services/`) and is framework-agnostic - it knows nothing about
-FastAPI/HTTP status codes. Mapping these to the standardized error
-response shape `{"code", "message", "correlation_id"}` and registering
-the actual FastAPI exception handler is Phase 5 - Observability work
-and is intentionally NOT implemented yet (see TODO below); only the
-exception types needed by `BookingService` exist so far.
+FastAPI/HTTP status codes. `register_exception_handlers()` wires these
+(and FastAPI/Starlette's own exception types) to the standardized error
+response shape `{"code", "message", "correlation_id"}` described in
+IMPLEMENTATION_PLAN.md Section 12 - see `app/main.py` for registration.
 """
+from __future__ import annotations
+
+import structlog
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+logger = structlog.get_logger(__name__)
 
 
 class DomainError(Exception):
@@ -55,26 +63,62 @@ _DOMAIN_ERROR_STATUS_CODES: dict[type[DomainError], int] = {
 
 
 def domain_error_status_code(exc: DomainError) -> int:
-    """Maps a `DomainError` (sub)type to its HTTP status code.
-
-    This is a narrow, router-level convenience only - it does NOT
-    build the full standardized `{"code", "message", "correlation_id"}`
-    envelope described in IMPLEMENTATION_PLAN.md Section 12. That
-    envelope requires the correlation ID (from middleware) and is
-    deliberately deferred to Phase 5 - Observability, where a real
-    centralized FastAPI exception handler will be registered on
-    `app/main.py` and this helper can be removed/absorbed into it.
-    """
+    """Maps a `DomainError` (sub)type to its HTTP status code."""
     return _DOMAIN_ERROR_STATUS_CODES.get(type(exc), 500)
 
 
-# TODO (Phase 5 - Observability, see IMPLEMENTATION_PLAN.md Section 12):
-# - Register a centralized exception handler on the FastAPI app (see
-#   `app/main.py`) that maps `DomainError` subclasses (and any
-#   unhandled exception) to the standardized error response shape:
-#       {"code": "...", "message": "...", "correlation_id": "..."}
-# - Ensure unhandled exceptions never leak a stack trace to the client.
-# - Once that handler exists, routers should stop catching DomainError
-#   themselves (see app/api/v1/appointments.py, availability.py) and
-#   let it propagate to the centralized handler instead.
+def _correlation_id(request: Request) -> str:
+    """Reads the correlation id bound onto `request.state` by
+    `CorrelationIdMiddleware` (see `app/core/middleware.py`). Falls back
+    to `"unknown"` so handlers never fail if a request somehow reaches
+    here without the middleware having run (e.g. in isolated tests)."""
+    return getattr(request.state, "correlation_id", None) or "unknown"
+
+
+def _error_response(request: Request, status_code: int, code: str, message: str) -> JSONResponse:
+    """Builds the standardized error envelope (Section 12):
+    `{"code", "message", "correlation_id"}`."""
+    return JSONResponse(
+        status_code=status_code,
+        content={"code": code, "message": message, "correlation_id": _correlation_id(request)},
+    )
+
+
+async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
+    return _error_response(request, domain_error_status_code(exc), exc.code, exc.message)
+
+
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Handles FastAPI/Pydantic request validation failures (422), e.g.
+    a malformed body, an unknown field (`extra="forbid"`), or a naive/
+    ambiguous `start_time` rejected by `to_utc()`."""
+    details = "; ".join(
+        f"{'.'.join(str(p) for p in error['loc'])}: {error['msg']}" for error in exc.errors()
+    )
+    return _error_response(request, 422, "validation_error", details or "Request validation failed.")
+
+
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Handles Starlette/FastAPI's own `HTTPException` (e.g. 404 for an
+    unknown route, 405 for a wrong method) with the standardized
+    envelope instead of Starlette's default `{"detail": ...}` shape."""
+    return _error_response(request, exc.status_code, "http_error", str(exc.detail))
+
+
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Last-resort handler: logs the full exception server-side but
+    never leaks internals (stack trace, exception message) to the
+    client (Section 12)."""
+    logger.exception("unhandled_exception", path=request.url.path, method=request.method)
+    return _error_response(request, 500, "internal_error", "An unexpected error occurred.")
+
+
+def register_exception_handlers(app: FastAPI) -> None:
+    """Registers all centralized exception handlers on `app` (called
+    once from `app/main.py`). Order does not matter to FastAPI/Starlette
+    - it dispatches by the most specific matching exception type."""
+    app.add_exception_handler(DomainError, domain_error_handler)
+    app.add_exception_handler(RequestValidationError, validation_error_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(Exception, unhandled_exception_handler)
 

@@ -1,18 +1,20 @@
 """FastAPI application entrypoint.
 
-Wires together settings, logging, and the versioned API router.
-Middleware and centralized exception handlers are still stubbed with
-TODOs (see `app/core/middleware.py`, `app/core/exceptions.py`) and are
-Phase 5 - Observability work.
-
-See IMPLEMENTATION_PLAN.md Section 8 (Phase 1 - Project Skeleton) and
-Section 7 (Folder Structure).
+Wires together settings, logging, the correlation-id/request-logging
+middleware, centralized exception handlers, and the versioned API
+router (IMPLEMENTATION_PLAN.md Section 8 Phase 1, Section 12
+Observability).
 """
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from app.api.v1.router import api_v1_router
 from app.core.config import get_settings
+from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.core.middleware import CorrelationIdMiddleware
+from app.db.session import SessionLocal
 
 settings = get_settings()
 configure_logging(settings)
@@ -31,18 +33,34 @@ def create_app() -> FastAPI:
         version=settings.version,
     )
 
-    # TODO: register correlation-id/request-logging middleware
-    # (see app/core/middleware.py - not yet implemented).
+    app.add_middleware(CorrelationIdMiddleware)
 
-    # TODO: register centralized exception handlers
-    # (see app/core/exceptions.py - not yet implemented; routers
-    # currently map DomainError -> HTTPException locally as an interim
-    # measure, see app/api/v1/appointments.py and availability.py).
+    register_exception_handlers(app)
 
     app.include_router(api_v1_router, prefix="/api/v1")
 
-    # TODO: add GET /health (liveness + DB connectivity probe, see
-    # IMPLEMENTATION_PLAN.md Section 10) - Phase 5 work.
+    @app.get("/health")
+    def health() -> dict:
+        """Liveness + DB connectivity probe (Section 10). Deliberately
+        bypasses the repository/service layers - this is an infra-only
+        check, not a domain operation - and uses its own short-lived
+        session rather than the request-scoped `get_db` dependency.
+        """
+        db_status = "UP"
+        try:
+            db = SessionLocal()
+            try:
+                db.execute(text("SELECT 1"))
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("health_check_db_failed")
+            db_status = "DOWN"
+
+        payload = {"status": db_status, "database": db_status, "version": settings.version}
+        if db_status == "DOWN":
+            return JSONResponse(status_code=503, content=payload)
+        return payload
 
     return app
 
