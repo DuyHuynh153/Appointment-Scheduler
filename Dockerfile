@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY alembic.ini .
 COPY migrations ./migrations
+COPY scripts ./scripts
 
 # Run migrations then start the server. Using `sh -c` so both commands
 # share the same shell and the migration failure aborts startup cleanly.

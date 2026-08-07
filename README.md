@@ -61,6 +61,48 @@ curl http://localhost:8000/health
 
 Interactive API docs: `http://localhost:8000/docs`
 
+### Seed data
+
+Run once after the stack is up to load one dealer, two technicians, two bays, two
+vehicles, and three service types with fixed IDs:
+
+```bash
+docker compose exec api python scripts/seed.py
+```
+
+The script is idempotent — it skips silently if data already exists.
+
+**Ready-to-use curl example** (book a 30-minute oil change):
+
+```bash
+curl -s -X POST http://localhost:8000/api/v1/appointments \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dealer_id":       "10000000-0000-0000-0000-000000000001",
+    "vehicle_id":      "40000000-0000-0000-0000-000000000001",
+    "service_type_id": "50000000-0000-0000-0000-000000000001",
+    "start_time":      "2026-09-15T09:00:00Z"
+  }' | python -m json.tool
+```
+
+Check availability before booking:
+
+```bash
+curl -s "http://localhost:8000/api/v1/availability?\
+dealer_id=10000000-0000-0000-0000-000000000001&\
+service_type_id=50000000-0000-0000-0000-000000000001&\
+date=2026-09-15" | python -m json.tool
+```
+
+| Seed entity | ID |
+|---|---|
+| Dealer — Sunrise Auto | `10000000-0000-0000-0000-000000000001` |
+| Vehicle — Jane Doe | `40000000-0000-0000-0000-000000000001` |
+| Vehicle — John Smith | `40000000-0000-0000-0000-000000000002` |
+| Service Type — Oil Change (30 min) | `50000000-0000-0000-0000-000000000001` |
+| Service Type — Tire Rotation (45 min) | `50000000-0000-0000-0000-000000000002` |
+| Service Type — Brake Inspection (60 min) | `50000000-0000-0000-0000-000000000003` |
+
 ---
 
 ## API Summary
@@ -137,7 +179,6 @@ Full rationale is in `docs/ADR/`. Highlights:
 | Appointment duration fixed by `service_type.duration_minutes` | Prevents client manipulation of scheduling windows |
 | No authentication | Out of scope; a half-implemented auth layer is worse than a documented gap |
 | No `notes` field | No DB column was added within scope; intentional omission, not an oversight |
-| No seed script | Entities must be inserted directly; out of scope for the assessment |
 | `GET /availability` is a snapshot | Returned slots are informational and do not lock resources; the booking endpoint enforces the real invariant |
 
 ---
