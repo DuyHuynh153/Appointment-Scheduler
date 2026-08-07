@@ -2,6 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -9,7 +13,6 @@ COPY app ./app
 COPY alembic.ini .
 COPY migrations ./migrations
 
-# TODO: once migrations exist (migrations/versions/ is currently empty),
-# switch this to run `alembic upgrade head` before starting uvicorn,
-# e.g. via a small entrypoint script.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run migrations then start the server. Using `sh -c` so both commands
+# share the same shell and the migration failure aborts startup cleanly.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

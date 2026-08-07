@@ -19,9 +19,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # TODO: add a healthcheck against GET /health once it's implemented
-    # (see app/main.py TODO), so orchestration can detect readiness,
-    # not just process start.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   postgres:
     image: postgres:16-alpine
