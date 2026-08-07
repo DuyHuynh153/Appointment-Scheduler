@@ -42,6 +42,17 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         start = time.perf_counter()
         try:
             response = await call_next(request)
+        except BaseException:
+            logger.warning(
+                "request_failed_before_response",
+                method=request.method,
+                path=request.url.path,
+                duration_ms=round((time.perf_counter() - start) * 1000, 2),
+                user_agent=request.headers.get("user-agent"),
+                correlation_id=correlation_id,
+                request_id=request_id,
+            )
+            raise
         finally:
             structlog.contextvars.clear_contextvars()
 
