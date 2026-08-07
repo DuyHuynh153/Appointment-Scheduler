@@ -1,0 +1,43 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      ENVIRONMENT: local
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/appointments
+      DB_ECHO: "false"
+      LOG_LEVEL: INFO
+      ENABLE_AUTO_ASSIGN: "true"
+      ENABLE_OVERLAP_VALIDATION: "true"
+      ENABLE_STRUCTURED_LOGGING: "true"
+      BUSINESS_HOURS_START: "08:00"
+      BUSINESS_HOURS_END: "18:00"
+      CORRELATION_ID_HEADER: X-Correlation-ID
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # TODO: add a healthcheck against GET /health once it's implemented
+    # (see app/main.py TODO), so orchestration can detect readiness,
+    # not just process start.
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: appointments
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

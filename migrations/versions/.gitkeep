@@ -1,0 +1,7 @@
+# Keeps this empty directory tracked in git until the first real
+
+# revision is generated (Phase 2 - Data Layer).
+
+# TODO: `alembic revision --autogenerate -m "initial schema"` once
+
+# models exist under app/models/.
