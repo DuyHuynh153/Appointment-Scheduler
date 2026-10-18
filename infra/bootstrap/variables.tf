@@ -27,3 +27,9 @@ variable "name_prefix" {
   type        = string
   default     = "sqs-lambda-test"
 }
+
+variable "github_repo_with_ids" {
+  description = "Repo in GitHub's ID-qualified OIDC sub format: owner@ownerId/repo@repoId"
+  type        = string
+  default     = "DuyHuynh153@87678876/Appointment-Scheduler@1326922400"
+}
