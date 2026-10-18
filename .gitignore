@@ -12,3 +12,13 @@ htmlcov/
 .ruff_cache/
 
 .DS_Store
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+*.zip
+
+infra/sqs-lambda-test/build/
