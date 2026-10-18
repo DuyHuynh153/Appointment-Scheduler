@@ -1,0 +1,75 @@
+name: sqs-lambda-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Terraform action
+        type: choice
+        options: [plan, apply, destroy]
+        default: plan
+
+permissions:
+  id-token: write   # bắt buộc cho OIDC
+  contents: read
+
+concurrency:
+  group: sqs-lambda-test
+  cancel-in-progress: false   # không bao giờ huỷ giữa chừng một lần apply
+
+env:
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "0"
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    # Trust policy chỉ cho phép nhánh master
+    if: github.ref == 'refs/heads/master'
+    defaults:
+      run:
+        working-directory: infra/sqs-lambda-test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.4"   # đặt bằng phiên bản local của bạn (terraform -version)
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Terraform fmt
+        run: terraform fmt -check
+
+      - name: Terraform init
+        run: terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        if: inputs.action == 'plan'
+        run: terraform plan
+
+      - name: Terraform apply
+        if: inputs.action == 'apply'
+        run: terraform apply -auto-approve
+
+      - name: Show outputs
+        if: inputs.action == 'apply'
+        run: |
+          {
+            echo '### Outputs'
+            echo '```'
+            terraform output
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Terraform destroy
+        if: inputs.action == 'destroy'
+        run: terraform destroy -auto-approve
